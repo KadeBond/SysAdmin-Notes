@@ -15,6 +15,8 @@
    - [Users, Groups, Permissions](#users-groups-permissions)
    - [sudo, Leavers, Active Directory](#sudo-leavers-active-directory)
    - [Disks, LVM, RAID](#disks-lvm-raid)
+   - [File Sharing with SMB and Samba](#file-sharing-with-smb-and-samba)
+   - [Backups and Restores](#backups-and-restores)
 7. [Quick Cross-Reference](#7-quick-cross-reference)
 8. [Port Numbers: Full Reference](#8-port-numbers-full-reference)
 9. [Linux ⇄ Windows Equivalents](#9-linux--windows-equivalents)
@@ -26,6 +28,8 @@
    - [Boot and recovery](#boot-and-recovery)
    - [Permissions, users, directory](#permissions-users-directory)
    - [Disk, LVM, RAID](#disk-lvm-raid)
+10. [Glossary](#10-glossary)
+11. [Command Quick Reference](#11-command-quick-reference)
 
 ---
 
@@ -266,17 +270,86 @@ Read **patterns**: 22+80 = Linux web server; 135+445 = Windows; 88+389+53 = doma
 ### Shell Basics and Safe Editing
 Linux = one tree under `/`. Navigate: `pwd`, `cd /etc`, `cd ..`, `cd ~`, `ls`. Read without changing: `cat`, `less` (q), `head`, `tail`, `tail -f`. Find: `find`, `grep` (see section 4). Safe edit: backup > edit > check > diff. Redirect: `>` overwrites, `>>` appends (`echo hello > f` erases; `ls > list.txt`).
 
+**Same tasks on Windows (PowerShell)**
+
+| Task | Linux | Windows |
+|---|---|---|
+| Sort a listing by size, biggest last | `ls -lS` | `Get-ChildItem \| Sort-Object Length` |
+| OS version on an unfamiliar server | `cat /etc/os-release` | `systeminfo` or `Get-ComputerInfo` |
+| First / last 10 lines | `head file` / `tail file` | `Get-Content file -Head 10` / `-Tail 10` |
+| Keep watching a log | `tail -f file` | `Get-Content file -Wait` |
+| Find files by name | `find /etc -name '*.conf'` | `Get-ChildItem C:\ -Filter *.conf -Recurse` |
+| Find one file anywhere | `find / -name sshd_config` | `Get-ChildItem C:\ -Filter sshd_config -Recurse` |
+| Text in one file | `grep error /var/log/syslog` | `Select-String -Path file -Pattern error` |
+| Text in every file under a folder | `grep -r ubuntu /etc` | `Get-ChildItem C:\dir -Recurse \| Select-String ubuntu` |
+| Ignore case | `grep -i port file` | `Select-String` (already ignores case) |
+| Backup before editing | `cp file file.bak` | `Copy-Item file file.bak` |
+| Edit | `nano file` | `notepad file` |
+| Confirm new text is in | `grep newword file` | `Select-String -Path file -Pattern newword` |
+| See exactly what changed | `diff file.bak file` | `Compare-Object (Get-Content file.bak) (Get-Content file)` |
+| Write text, **erasing** the file | `echo hello > file` | `Set-Content file 'hello'` |
+| **Append** text | `echo hello >> file` | `Add-Content file 'hello'` |
+| Save output to a file | `ls > list.txt` | `Get-ChildItem > list.txt` |
+
+Examples: `cd /etc ; ls -lS` shows the largest config files last, so you spot what takes space. `grep -i port /etc/ssh/sshd_config` shows the line that sets the SSH port. `echo text > /etc/motd` replaces the whole login message; `>>` would add below the old text. `cp site.txt site.txt.bak ; nano site.txt ; diff site.txt.bak site.txt` shows exactly what you changed, with the `.bak` to go back to.
+
 ### Installing a Server and Disk Layout
 - Build the server as a **VirtualBox VM** so it never touches the laptop: New > Settings/Storage (attach Ubuntu Server ISO) > Settings/Network (**Adapter 1 NAT** = internet, **Adapter 2 Host-only** = private network) > Start.
 - **Partitions** protect the server (full logs on a single partition stop everything): example layout: `/` ~15 GB, `/home` ~5 GB, `/var` ~4 GB kept separate. Choose **Custom storage layout** at install.
 - **SSH:** tick "Install OpenSSH server", or `sudo apt install openssh-server -y` then `sudo systemctl enable --now ssh`.
 - After install: `lsblk`, `df -h`, then VirtualBox Machine > **Take Snapshot** named `clean-install`.
 
+**More on server install**
+- A server is not special hardware: it is a computer running a server OS (Ubuntu Server, Windows Server). Building it as a VM means it never touches the real machine and can be thrown away and rebuilt. Two adapters (NAT for updates, Host-only so your VMs can see each other) is the standard pattern.
+- Windows keeps a single `C:` by default; the same separation idea there is a separate `D:` for data.
+- Example: `df -h` shows `/var` at 100% but `/` at 40%: the logs filled up, but the system still runs because `/var` is its own partition. If `df -h` shows only `/`, the custom layout step was skipped.
+- A **snapshot** is a saved copy of the whole VM you can return to any time; take one named `clean-install` after setup and use it whenever something breaks.
+
+| Task | Linux | Windows |
+|---|---|---|
+| Turn on remote login at install | tick "Install OpenSSH server" | `Enable-PSRemoting -Force` |
+| Add it after install | `sudo apt install openssh-server -y` | `Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0` |
+| Start now and at every boot | `sudo systemctl enable --now ssh` | `Set-Service sshd -StartupType Automatic ; Start-Service sshd` |
+| List disks and partitions | `lsblk` | `Get-Disk ; Get-Partition` |
+| Each partition and how full | `df -h` | `Get-Volume` |
+| Restore point | VirtualBox: Machine > Take Snapshot | same |
+
 ### Boot, systemd, SSH
 - **Boot stages:** Firmware > GRUB (menu, rescue door) > Kernel > systemd (mounts disks, starts services) > Login. Check which stage stopped.
 - **SSH:** `ssh user@192.168.56.10`, `hostname`, `exit`, `ssh-copy-id user@server` (key login, no password).
 - **systemd:** `systemctl status ssh`, `start` (now), `stop`, `enable` (every boot), `systemctl --failed`. **start != enable.**
 - **Bad `/etc/fstab` line = emergency mode.** Fix: `mount -o remount,rw /` > `sudo nano /etc/fstab` (fix/remove line; add `nofail` for a missing disk) > `mount -a` (no error = safe) > `reboot`.
+
+**Boot stages, Linux vs Windows**
+
+| Stage | Linux | Windows |
+|---|---|---|
+| 1. Firmware | BIOS or UEFI starts the machine | BIOS or UEFI |
+| 2. Boot loader | GRUB, the boot menu that loads Linux; your rescue door | Windows Boot Manager |
+| 3. Kernel | Linux kernel starts | Windows kernel starts |
+| 4. Service manager | systemd mounts disks and starts all services | Service Control Manager starts services |
+| 5. Login | prompt | sign-in screen |
+
+Work out which stage it reached; that tells you where to look. Example: GRUB menu shows, then an emergency prompt = stages 1-3 worked and stage 4 failed, usually a disk that could not be mounted.
+
+**Remote login and service control, Linux vs Windows**
+
+| Task | Linux | Windows |
+|---|---|---|
+| Log in to a server | `ssh user@192.168.56.10` | `Enter-PSSession -ComputerName 192.168.56.20 -Credential Administrator` |
+| Which machine am I on | `hostname` | `hostname` |
+| Leave | `exit` | `Exit-PSSession` |
+| Passwordless login | `ssh-copy-id user@server` | add the public key to `.ssh\authorized_keys` |
+| Server's private address | `ip -br addr` | `ipconfig` |
+| Is it running | `systemctl status ssh` | `Get-Service sshd` |
+| Start / stop now | `sudo systemctl start ssh` / `stop` | `Start-Service sshd` / `Stop-Service sshd` |
+| Start at every boot | `sudo systemctl enable ssh` | `Set-Service sshd -StartupType Automatic` |
+| Anything that failed | `systemctl --failed` | `Get-Service \| Where Status -ne Running` |
+| Time each service took to start | `systemd-analyze blame` | Event Viewer, Diagnostics-Performance log |
+| Errors from this boot only | `journalctl -b -p err` | `Get-EventLog -LogName System -EntryType Error -Newest 10` |
+| Rescue a bad fstab | `mount -o remount,rw /` ; `nano /etc/fstab` ; `mount -a` | Startup Repair from the recovery menu |
+
+Examples: from another VM, `ssh alice@192.168.56.10` then `hostname` prints the *server's* name; you are now working on it. `systemctl start tracking` makes a site work today; without `systemctl enable tracking` it is down again after the next reboot. An fstab line like `/dev/sdb1 /data ext4 defaults,nofail 0 2` mounts the disk when present and quietly skips it when not, so the server always boots.
 
 ### Users, Groups, Permissions
 **Words:** rwx, UID, GID, `-aG` (append to groups, never wipes others), setgid, ACL, NTFS.
@@ -318,6 +391,61 @@ Linux = one tree under `/`. Navigate: `pwd`, `cd /etc`, `cd ..`, `cd ~`, `ls`. R
 - **RAID 1** mirrors two disks; survives one failure. `sudo mdadm --create /dev/md0 --level=1 --raid-devices=2 /dev/sdb /dev/sdc`; health `cat /proc/mdstat` (**[UU]** healthy, **[U_]** one failed, still running); `sudo mdadm --detail /dev/md0`. Windows: mirror via `New-StoragePool ... -ResiliencySetting Mirror`, `Get-PhysicalDisk`.
 - **RAID is NOT a backup:** deletions (`rm -rf`), ransomware and fire hit both disks. It buys uptime, not recovery. Need separate, tested backups (next topic).
 
+### File Sharing with SMB and Samba
+
+**SMB** (Server Message Block) is the file-sharing language Windows uses. **Samba** is the Linux program that speaks SMB, so a Windows or Linux machine can open a Linux folder like a normal shared drive. Windows shares folders natively. Use it when a team needs one folder that several machines can open.
+
+| Task | Linux (Ubuntu) | Windows (PowerShell) |
+|---|---|---|
+| Install the service | `sudo apt install samba` | built in |
+| Share a folder | edit `/etc/samba/smb.conf`, add a `[share]` block | `New-SmbShare -Name docs -Path C:\docs` |
+| Set a share password | `sudo smbpasswd -a alice` | uses the Windows account |
+| Apply changes | `sudo systemctl restart smbd` | applies immediately |
+| Connect from another machine | `smbclient //server/docs -U alice` | `net use Z: \\server\docs` |
+
+A basic `[share]` block:
+```
+[docs]
+   path = /srv/docs
+   valid users = alice
+   read only = no
+```
+`testparm` checks the file for mistakes before you restart. `smbclient` drops you at an `smb: \>` prompt, inside the shared folder from the other machine.
+
+**Windows permissions:** share permissions **and** NTFS permissions both apply; the stricter one wins.
+
+### Backups and Restores
+
+**A backup you have never restored is only a hope.** "Backup completed" only means the program finished; the file might be empty, corrupt, or missing the folder you needed. Only restoring a file and opening it proves the backup works. (Ties back to RPO/RTO in section 1.)
+
+**restic** stores **snapshots** (point-in-time copies) in a **repository** and can restore a single file. Windows Server Backup (`wbadmin`) does the same job.
+
+| Task | Linux (restic) | Windows (wbadmin) |
+|---|---|---|
+| Create the backup store | `restic init -r /backup` | `wbadmin enable backup ...` |
+| Take a backup | `restic backup /srv/docs -r /backup` | `wbadmin start backup -include:C:\docs` |
+| List saved copies | `restic snapshots -r /backup` | `wbadmin get versions` |
+| Restore | `restic restore latest -r /backup --target /tmp/r` | `wbadmin start recovery ...` |
+
+**Prove it with a test restore** (after every new backup job, then on a schedule; do not trust the green tick):
+
+| Task | Linux | Windows |
+|---|---|---|
+| Restore one file to a test spot | `restic restore latest -r /backup --include /srv/docs/a.txt --target /tmp/r` | `wbadmin start recovery -itemtype:File ...` |
+| Open it and compare | `diff /srv/docs/a.txt /tmp/r/srv/docs/a.txt` (no output = identical) | `fc C:\docs\a.txt C:\r\a.txt` |
+| Check the backup store itself | `restic check -r /backup` | `wbadmin get status` |
+
+Run backups daily, on a schedule, for anything you cannot afford to lose. The restore command matters more than the backup command.
+
+**The 3-2-1 rule:** **3** copies of the data (the live one plus two backups), on **2** kinds of media (e.g. disk and cloud), with **1** copy off-site (a different building). No single fire, theft, ransomware attack or disk failure can then take everything. If you can count only one copy, or every copy is in one room, you do not yet have a backup.
+
+| Copy | Linux | Windows |
+|---|---|---|
+| 1. Live data | `/srv/docs` on the server | `C:\docs` on the server |
+| 2. Local backup | restic repo on a second disk | wbadmin to a second disk |
+| 3. Off-site | restic repo on a remote server or cloud, e.g. `restic backup /srv/docs -r sftp:backup@offsite:/repo` | backup to a remote share or cloud |
+| Two media types | disk + cloud, or disk + tape | disk + cloud |
+
 ---
 
 ## 7. Quick Cross-Reference
@@ -327,6 +455,7 @@ Linux = one tree under `/`. Navigate: `pwd`, `cd /etc`, `cd ..`, `cd ~`, `ls`. R
 - Always `nofail` in fstab; snapshot after clean install.
 - Close every door for leavers: password, shell, SSH key, sessions, admin rights.
 - Group-based access everywhere (Linux groups, AD groups, setgid shared dirs).
+- A backup is only real once you have restored from it; follow 3-2-1.
 
 ---
 
@@ -487,3 +616,72 @@ PowerShell aliases (`ls`, `cat`, `cd`, `pwd`, `cp`, `mv`, `rm`, `man`, `ps`) als
 | `mkfs.ext4` / `mount` / fstab | `Format-Volume` / drive letter (persists by default) |
 | LVM: `pvcreate`, `vgextend`, `lvextend -r` | Storage Spaces: `Add-PhysicalDisk`, `Resize-VirtualDisk`, `Resize-Partition` |
 | RAID 1: `mdadm`, `/proc/mdstat` | Storage Spaces mirror: `New-StoragePool ... -ResiliencySetting Mirror`, `Get-VirtualDisk` |
+
+---
+
+## 10. Glossary
+
+| Term | In full, and what it means |
+|---|---|
+| 3-2-1 | three copies of data, two kinds of media, one off-site |
+| AD | Active Directory: Microsoft's central store of users, groups and computers |
+| BIOS / UEFI | Basic Input Output System / Unified Extensible Firmware Interface: firmware that starts the machine |
+| DC | Domain Controller: the Windows server that runs Active Directory |
+| fstab | filesystem table: `/etc/fstab` lists disks to mount at boot |
+| GRUB | GRand Unified Bootloader: the Linux boot menu that loads the kernel |
+| Host-only | a private VirtualBox network only your VMs and host can see |
+| ISO | a single file holding an entire installer disc |
+| kernel | the core of the operating system |
+| LV | Logical Volume: a resizable "partition" taken from an LVM pool |
+| LVM | Logical Volume Manager: pools disks so storage can grow later |
+| mount | attach a disk so it appears as a folder |
+| NAT | Network Address Translation: VirtualBox adapter mode that gives a VM internet through the host |
+| nano | simple terminal text editor (Ctrl-O saves, Ctrl-X exits) |
+| nofail | fstab option: if this disk is missing, skip it and keep booting |
+| off-site | stored in a different physical place so one disaster cannot take everything |
+| OpenSSH | the program that provides SSH on Linux and Windows |
+| OS | Operating System |
+| OU | Organizational Unit: a folder inside Active Directory for sorting users and computers |
+| PAM | Pluggable Authentication Modules: decides how logins are checked on Linux |
+| partition | one slice of a disk with its own filesystem |
+| PowerShell Remoting | the Windows way to run commands on another machine |
+| PV | Physical Volume: a raw disk added to LVM |
+| RAID | Redundant Array of Independent Disks: several disks working as one for safety or speed |
+| restic | backup program that stores snapshots and can restore single files |
+| root | the all-powerful Linux admin account (Administrator on Windows) |
+| Samba | Linux program that speaks SMB so Windows can open Linux folders |
+| SMB | Server Message Block: the language Windows uses to share files |
+| snapshot | a saved point-in-time copy (of a VM or of backed-up files) |
+| SSH | Secure Shell: encrypted login to another machine |
+| SSH key | a file used instead of a password to log in |
+| sudo | superuser do: run one command with root power |
+| systemctl / systemd | the Linux service manager and the command that controls it |
+| journalctl | reads systemd's log (the journal) |
+| VG | Volume Group: a pool made of one or more Physical Volumes |
+| visudo | safe editor for sudo rules; checks the file before saving |
+| VM | Virtual Machine: a computer running inside software like VirtualBox |
+| /var | Linux folder for logs and other changing data |
+
+---
+
+## 11. Command Quick Reference
+
+| Job | Linux | Windows (PowerShell) |
+|---|---|---|
+| Where am I / what is here | `pwd` ; `ls -l` | `Get-Location` ; `Get-ChildItem` |
+| Move between folders | `cd /etc` ; `cd ..` ; `cd ~` | `Set-Location C:\Windows` ; `Set-Location ..` |
+| Read a file | `cat`, `less`, `head`, `tail`, `tail -f` | `Get-Content` (`-Head`, `-Tail`, `-Wait`) |
+| Find a file by name | `find /etc -name '*.conf'` | `Get-ChildItem C:\ -Filter *.conf -Recurse` |
+| Find text in files | `grep -i word file` ; `grep -r word /dir` | `Select-String -Path file -Pattern word` |
+| Safe edit | `cp f f.bak` ; `nano f` ; `diff f.bak f` | `Copy-Item` ; `notepad` ; `Compare-Object` |
+| Write / append | `echo x > f` ; `echo x >> f` | `Set-Content` ; `Add-Content` |
+| Disks and space | `lsblk` ; `df -h` | `Get-Disk` ; `Get-Volume` |
+| Remote login | `ssh user@host` ; `exit` | `Enter-PSSession` ; `Exit-PSSession` |
+| Services | `systemctl status/start/stop/enable` ; `systemctl --failed` | `Get-Service` ; `Start-/Stop-Service` ; `Set-Service -StartupType` |
+| Boot and logs | `systemd-analyze blame` ; `journalctl -b -p err` | `Get-EventLog -LogName System -EntryType Error` |
+| Rescue a bad fstab | `mount -o remount,rw /` ; `nano /etc/fstab` ; `mount -a` | Startup Repair from the recovery menu |
+| Users and groups | `useradd`, `usermod -aG`, `id` | `New-LocalUser`, `Add-LocalGroupMember` |
+| Permissions | `ls -l` ; `chmod` ; `chgrp` | `icacls` |
+| Grow / mirror storage | `lvextend -r` ; `mdadm` ; `cat /proc/mdstat` | `Resize-VirtualDisk` ; Storage Spaces mirror |
+| Share a folder | Samba (`smb.conf`) ; `smbclient` | `New-SmbShare` ; `net use` |
+| Back up and restore | `restic init/backup/snapshots/restore` | `wbadmin` |
